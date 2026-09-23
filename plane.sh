@@ -120,7 +120,9 @@ case "$cmd" in
     # DNS sai thì Let's Encrypt không cấp được cert. Cảnh báo thôi, không chặn:
     # có người trỏ DNS sau, hoặc chạy sau một lớp proxy khác.
     host_ip="$(curl -fsS --max-time 8 https://ifconfig.me 2>/dev/null || echo '')"
-    dns_ip="$(getent hosts "$domain" | awk '{print $1; exit}')"
+    # || true bắt buộc: pipefail + getent trả mã 2 khi domain chưa phân giải được,
+    # không chặn thì set -e giết cả script ngay tại bước cảnh báo.
+    dns_ip="$(getent hosts "$domain" | awk '{print $1; exit}' || true)"
     if [ -z "$dns_ip" ]; then
       echo "⚠ $domain chưa phân giải được — Let's Encrypt sẽ KHÔNG cấp cert cho tới khi bạn trỏ DNS."
     elif [ -n "$host_ip" ] && [ "$dns_ip" != "$host_ip" ]; then
