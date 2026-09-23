@@ -133,16 +133,18 @@ case "$cmd" in
 
     # ── Sinh cấu hình ────────────────────────────────────────────────────────
     command -v openssl >/dev/null || die "cần openssl để sinh secret"
-    umask 077
-    sed -e "s|^PLANE_INSTANCE=.*|PLANE_INSTANCE=$instance|" \
-        -e "s|^APP_DOMAIN=.*|APP_DOMAIN=$domain|" \
-        -e "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|" \
-        -e "s|^LIVE_SERVER_SECRET_KEY=.*|LIVE_SERVER_SECRET_KEY=$(openssl rand -hex 32)|" \
-        -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 16)|" \
-        -e "s|^RABBITMQ_PASSWORD=.*|RABBITMQ_PASSWORD=$(openssl rand -hex 16)|" \
-        -e "s|^AWS_ACCESS_KEY_ID=.*|AWS_ACCESS_KEY_ID=plane-$(openssl rand -hex 6)|" \
-        -e "s|^AWS_SECRET_ACCESS_KEY=.*|AWS_SECRET_ACCESS_KEY=$(openssl rand -hex 20)|" \
-        "$ROOT/plane.local.env.example" > "$ROOT/plane.local.env"
+    # umask trong subshell để nó chỉ ảnh hưởng file secret này, không lây sang
+    # thư mục plane-app tạo sau đó (bị 700 thì user khác không đọc được file gốc).
+    ( umask 077
+      sed -e "s|^PLANE_INSTANCE=.*|PLANE_INSTANCE=$instance|" \
+          -e "s|^APP_DOMAIN=.*|APP_DOMAIN=$domain|" \
+          -e "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|" \
+          -e "s|^LIVE_SERVER_SECRET_KEY=.*|LIVE_SERVER_SECRET_KEY=$(openssl rand -hex 32)|" \
+          -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 16)|" \
+          -e "s|^RABBITMQ_PASSWORD=.*|RABBITMQ_PASSWORD=$(openssl rand -hex 16)|" \
+          -e "s|^AWS_ACCESS_KEY_ID=.*|AWS_ACCESS_KEY_ID=plane-$(openssl rand -hex 6)|" \
+          -e "s|^AWS_SECRET_ACCESS_KEY=.*|AWS_SECRET_ACCESS_KEY=$(openssl rand -hex 20)|" \
+          "$ROOT/plane.local.env.example" > "$ROOT/plane.local.env" )
     chmod 600 "$ROOT/plane.local.env"
     echo "✓ đã tạo plane.local.env (secret sinh ngẫu nhiên, chmod 600)"
 
