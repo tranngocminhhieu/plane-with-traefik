@@ -2,9 +2,15 @@
 # Traefik. File này chỉ đè phần mạng/cổng/image; docker-compose.yaml giữ nguyên bản gốc
 # của Plane để lần nâng cấp sau ghi đè file đó mà không làm mất cấu hình ở đây.
 services:
-  # docker-compose.yaml gốc trỏ minio/minio:latest trên Docker Hub, nhưng repo đó đã bị gỡ
-  # ("pull access denied ... repository does not exist") — MinIO chuyển image chính chủ sang
-  # quay.io. Pin bản cụ thể thay vì :latest để lần deploy sau không bị đổi build dưới chân.
+  # ── VÁ TẠM, XOÁ KHI PLANE SỬA ──────────────────────────────────────────────
+  # docker-compose.yaml gốc trỏ minio/minio:latest trên Docker Hub, nhưng repo đó
+  # đã bị gỡ ("pull access denied ... repository does not exist") nên KHÔNG pull
+  # được gì cả. MinIO chuyển image chính chủ sang quay.io.
+  # Đây là chỗ duy nhất trong repo này không liên quan tới Traefik — nó tồn tại
+  # chỉ vì file gốc đang hỏng. Kiểm tra định kỳ xem đã bỏ được chưa:
+  #     docker manifest inspect minio/minio:latest
+  # Lệnh đó chạy được tức là Docker Hub đã có lại, xoá hẳn khối plane-minio dưới
+  # đây để quay về đúng image mà Plane chỉ định.
   plane-minio:
     image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
 
@@ -16,22 +22,22 @@ services:
       - default      # nói chuyện với web/api/space/admin/live trong mạng của project
       - proxy_net    # để Traefik nhìn thấy và gọi vào
     # labels viết dạng LIST chứ không phải mapping: Compose chỉ nội suy biến ở
-    # phần value, không nội suy ở KEY. Viết mapping thì ${PLANE_INSTANCE} nằm trong
-    # key và render ra "$${PLANE_INSTANCE}" — Traefik lặng lẽ bỏ qua router đó.
+    # phần value, không nội suy ở KEY. Viết mapping thì plane nằm trong
+    # key và render ra "$plane" — Traefik lặng lẽ bỏ qua router đó.
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=proxy_net"
-      # Tên router/service lấy theo ${PLANE_INSTANCE}: hai bản Plane trên cùng một
-      # Traefik mà trùng tên router là chúng đá nhau, Traefik giữ một cái và không báo.
-      # Dùng PLANE_INSTANCE chứ không dùng thẳng COMPOSE_PROJECT_NAME vì Compose
-      # không nội suy biến COMPOSE_* vào file YAML.
-      # ${APP_DOMAIN} cũng lấy từ plane.local.env — domain khai MỘT chỗ duy nhất.
-      - "traefik.http.routers.${PLANE_INSTANCE}.rule=Host(`${APP_DOMAIN}`)"
-      - "traefik.http.routers.${PLANE_INSTANCE}.entrypoints=websecure"
-      - "traefik.http.routers.${PLANE_INSTANCE}.tls.certresolver=letsencrypt"
+      # Tên router cố định là "plane": một máy chạy một bản Plane, đúng như giả
+      # định của setup.sh. Muốn chạy bản thứ hai thì đổi tên này VÀ đặt
+      # COMPOSE_PROJECT_NAME khác — nhưng khi đó lệnh Backup/View Logs của
+      # setup.sh sẽ không tìm thấy container nữa vì nó dò theo project mặc định.
+      # ${APP_DOMAIN} lấy từ plane.local.env — domain khai MỘT chỗ duy nhất.
+      - "traefik.http.routers.plane.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.plane.entrypoints=websecure"
+      - "traefik.http.routers.plane.tls.certresolver=letsencrypt"
       # Caddy trong plane-proxy nghe cổng 80 (SITE_ADDRESS=:80 trong plane.env);
       # TLS do Traefik lo, nên ở đây là HTTP thuần.
-      - "traefik.http.services.${PLANE_INSTANCE}.loadbalancer.server.port=80"
+      - "traefik.http.services.plane.loadbalancer.server.port=80"
 
 networks:
   proxy_net:

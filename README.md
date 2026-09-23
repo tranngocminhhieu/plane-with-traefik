@@ -1,176 +1,186 @@
 # plane-with-traefik
 
-Deploy [Plane](https://plane.so) community edition **phía sau một Traefik có sẵn**, bằng ba lệnh.
+Chạy [Plane](https://plane.so) community edition **phía sau một Traefik có sẵn**.
+
+Repo này cố ý giữ mức can thiệp nhỏ nhất: **không fork, không viết lại công cụ của
+Plane**. Cài đặt, nâng cấp, backup vẫn do `setup.sh` chính chủ lo — Plane đổi gì thì
+những việc đó tự đúng theo. Phần của repo chỉ là **một file override cho Traefik** và
+**một file env chứa cấu hình riêng**, cộng một wrapper 30 dòng không có lệnh nào của
+riêng nó.
+
+## Ai làm việc gì
+
+| Việc | Dùng | Vì sao |
+|---|---|---|
+| Cài đặt, nâng cấp, backup, xem log | **`setup.sh` của Plane** | Chính chủ duy trì, luôn đúng khi họ đổi |
+| **Khởi động / dừng** | **`./plane.sh`** | `setup.sh` gọi compose bằng `-f docker-compose.yaml` tường minh nên **bỏ qua file override** — Plane sẽ đòi cổng 80/443 và đụng Traefik |
+
+`./plane.sh` chuyển thẳng mọi tham số sang `docker compose`, không diễn giải gì:
 
 ```bash
-git clone https://github.com/tranngocminhhieu/plane-with-traefik.git
-cd plane-with-traefik
-./plane.sh init ticket.example.com     # sinh secret + tải file gốc của Plane
-./plane.sh up                          # khởi động
+./plane.sh up -d
+./plane.sh ps
+./plane.sh logs -f api
+./plane.sh down
 ```
-
-Rồi mở `https://ticket.example.com/god-mode/` để tạo tài khoản quản trị.
-
-Repo này **không fork, không sửa** file nào của Plane. Mọi thứ của nhà phát triển
-gốc được tải mới lúc deploy và giữ nguyên xi; phần riêng gói trong **2 file override**.
 
 ## Yêu cầu
 
 - Docker + Docker Compose **v2.24 trở lên** (cần cú pháp `!override`)
 - **Traefik đã chạy sẵn**, có network ngoài `proxy_net`, entrypoint `websecure`,
   certresolver `letsencrypt`. Tên khác thì sửa trong `docker-compose.override.yaml`.
-- **DNS đã trỏ**: bản ghi A của domain chỉ về máy này. `init` sẽ kiểm tra và cảnh
-  báo nếu chưa — không trỏ đúng thì Let's Encrypt không cấp được cert.
+- **DNS đã trỏ**: bản ghi A của domain chỉ về máy này, trước khi chạy — nếu không
+  Let's Encrypt sẽ không cấp được cert.
 - RAM ≥ 4GB (8GB cho production), đĩa trống ≥ 20GB.
+
+## Cài đặt
+
+### 1. Lấy repo
+
+```bash
+git clone https://github.com/tranngocminhhieu/plane-with-traefik.git
+cd plane-with-traefik
+```
+
+### 2. Điền cấu hình riêng
+
+```bash
+cp plane.local.env.example plane.local.env
+chmod 600 plane.local.env
+
+# sinh secret, dán vào 6 dòng còn trống
+for i in 1 2; do openssl rand -hex 32; done; for i in 1 2; do openssl rand -hex 16; done
+```
+
+Mở `plane.local.env`, sửa `APP_DOMAIN` thành domain của bạn và điền đủ secret.
+Không phải sửa gì trong `docker-compose.override.yaml` — label Traefik đọc
+`${APP_DOMAIN}` từ chính file này.
+
+### 3. Để `setup.sh` của Plane tải file gốc
+
+```bash
+curl -fsSL -o setup.sh https://github.com/makeplane/plane/releases/latest/download/setup.sh
+chmod +x setup.sh
+./setup.sh          # chọn 1 (Install), rồi thoát menu
+```
+
+> ⚠ **Bước này luôn kết thúc bằng lỗi — cứ bỏ qua:**
+> ```
+> plane-minio Error pull access denied for minio/minio, repository does not exist
+> Failed to pull the images. Exiting...
+> ```
+> `setup.sh` pull bằng file gốc nên vẫn trỏ vào image MinIO đã bị gỡ khỏi Docker Hub.
+> Không sao: `docker-compose.yaml` và `plane.env` đã ghi xong **trước** bước pull, và
+> `./plane.sh up -d` sẽ pull lại bằng image đúng. Kiểm tra:
+> `ls plane-app/docker-compose.yaml plane-app/plane.env`
+
+### 4. Khởi động
+
+```bash
+./plane.sh up -d
+./plane.sh logs -f migrator     # chờ migration xong rồi Ctrl-C
+```
+
+### 5. Tạo tài khoản quản trị
+
+Mở `https://<domain>/god-mode/`, tạo **Instance Admin** (ai vào trước thì được), rồi:
+
+- **Tắt `enable_signup`** nếu là hệ thống nội bộ — mặc định ai biết domain cũng tự đăng ký được
+- **Cấu hình SMTP** — mặc định chưa có nên không mời được thành viên qua email, không dùng được magic link
+
+## Nâng cấp và backup
+
+Dùng menu của `setup.sh`:
+
+```bash
+./setup.sh          # 5 = Upgrade, 7 = Backup Data, 6 = View Logs
+```
+
+`Upgrade` dừng dịch vụ, tải file gốc bản mới rồi **dừng lại** ở đó (nó in
+"PLEASE VALIDATE AND START SERVICES"). Khởi động lại bằng `./plane.sh up -d`.
+
+> ⛔ **Đừng dùng 2 (Start), 3 (Stop), 4 (Restart)** — chúng bỏ qua file override.
+> Dùng `./plane.sh up -d` / `./plane.sh down` / `./plane.sh restart`.
+
+`Upgrade` ghi đè `plane.env` bằng bản mới. Không sao: cấu hình của bạn nằm trong
+`plane.local.env` và được nạp sau nên vẫn thắng. Nhưng **nên xem `plane.env` bản mới**
+xem Plane có thêm biến nào đáng quan tâm không.
 
 ## Cấu trúc
 
 ```
 plane-with-traefik/
-├── plane.sh                          ← wrapper, xem "Vì sao cần plane.sh"
-├── docker-compose.override.yaml      ← 1. đè phần mạng/cổng/image
-├── plane.local.env.example           ← 2. mẫu cho biến riêng
+├── docker-compose.override.yaml      ← phần override cho Traefik
+├── plane.local.env.example           ← mẫu cho cấu hình riêng
+├── plane.sh                          ← wrapper 30 dòng, không có lệnh riêng
 ├── README.md  LICENSE  .gitignore
 │
 ├── plane.local.env                   (secret của bạn — .gitignore)
-└── plane-app/                        (100% của Plane — .gitignore trọn gói)
+├── setup.sh                          (của Plane — .gitignore)
+└── plane-app/                        (của Plane, setup.sh tạo — .gitignore trọn gói)
     ├── docker-compose.yaml
     └── plane.env
 ```
 
-Nguyên tắc: **`plane.env` không bao giờ bị sửa.** Muốn đổi gì thì khai lại biến đó
-trong `plane.local.env`, Compose nạp file sau đè file trước. Nhờ vậy nâng cấp Plane
-chỉ là tải đè `plane.env` bản mới, cấu hình của bạn không mất và không lẫn vào file gốc.
+**`plane.env` không bao giờ bị sửa.** Muốn đổi gì thì khai lại biến đó trong
+`plane.local.env`; Compose nạp file sau đè file trước. Nhờ vậy `setup.sh` ghi đè
+`plane.env` thoải mái mà cấu hình của bạn không mất.
 
-## Hai file override làm gì
+## File override làm gì
 
-**`docker-compose.override.yaml`** sửa đúng 2 chỗ:
+**Một việc chính, vì Traefik:** gỡ publish cổng 80/443 của service `proxy`
+(dùng `!override []`), gắn nó vào `proxy_net` kèm label router. Mặc định Plane tự
+chiếm 80/443, đụng ngay với Traefik đang chạy. Giờ Traefik lo TLS, Caddy nội bộ của
+Plane chỉ nghe HTTP trong mạng nội bộ.
 
-1. **Gỡ publish cổng 80/443** của service `proxy` (dùng `!override []`), gắn nó vào
-   `proxy_net` kèm label Traefik. Mặc định Plane tự chiếm 80/443, đụng ngay với
-   Traefik. Giờ Traefik lo TLS, Caddy nội bộ của Plane chỉ nghe HTTP trong mạng nội bộ.
-2. **Đổi image MinIO sang quay.io.** Repo `minio/minio` trên Docker Hub đã bị gỡ —
-   bản gốc pull nó sẽ chết với `pull access denied ... repository does not exist`.
-   Image chính chủ giờ ở `quay.io/minio/minio`, đã pin theo release thay vì `latest`.
-
-**`plane.local.env`** chứa 13 biến khác bản gốc: tên instance (2), domain (3),
-secret ứng dụng (2), mật khẩu Postgres / RabbitMQ / MinIO (6).
-
-## `init` làm gì cho bạn
+**Một vá tạm, không liên quan Traefik:** đổi image MinIO sang `quay.io/minio/minio`.
+Repo `minio/minio` trên Docker Hub đã bị gỡ nên file gốc **không pull được gì cả**.
+Đây là chỗ duy nhất trong repo đi chệch khỏi nguyên tắc "không chế thêm", và nó tồn
+tại chỉ vì file gốc đang hỏng. Kiểm tra định kỳ xem đã bỏ được chưa:
 
 ```bash
-./plane.sh init <domain> [tên-instance]
+docker manifest inspect minio/minio:latest
 ```
 
-- Sinh ngẫu nhiên cả 6 secret, `chmod 600` — không còn `change-this-key-on-deployment`
-- Đặt `PLANE_INSTANCE` (mặc định lấy nhãn đầu của domain) — quyết định tiền tố
-  container, volume **và tên router Traefik**
-- Kiểm tra DNS đã trỏ về máy này chưa
-- **Từ chối ghi đè** `plane.local.env` đang có — ghi đè là mất secret mà Postgres
-  đã khởi tạo theo, tức là mất data
-- **Từ chối trùng tên** với compose project đang chạy — xem mục dưới
-- Tải `docker-compose.yaml` + `plane.env` bản mới nhất thẳng từ GitHub release
+Chạy được tức là Docker Hub đã có lại — xoá khối `plane-minio` trong file override.
 
-Ghim một bản cụ thể: `PLANE_RELEASE=v1.4.2 ./plane.sh init ...`
+## `plane.local.env` có gì
 
-## Vận hành
+11 biến, đều là những biến **đã có sẵn** trong `plane.env` của Plane, chỉ khai lại
+với giá trị khác:
 
-```bash
-./plane.sh up                 # pull + khởi động
-./plane.sh ps                 # trạng thái
-./plane.sh logs api           # xem log 1 service
-./plane.sh down               # tắt — GIỮ NGUYÊN data
-./plane.sh restart
-./plane.sh backup             # dump DB + file đính kèm + config → ./backups/
-./plane.sh upgrade v1.5.0     # tải file gốc bản mới rồi khởi động lại
-./plane.sh pull               # chỉ kéo image, không khởi động
-./plane.sh config             # in cấu hình đã merge, để soi khi nghi ngờ
-./plane.sh help
-./plane.sh <lệnh compose bất kỳ>
-```
+- **domain** (3): `APP_DOMAIN`, `WEB_URL`, `CORS_ALLOWED_ORIGINS` — đổi sang `https`
+  vì Traefik lo TLS
+- **secret ứng dụng** (2): `SECRET_KEY`, `LIVE_SERVER_SECRET_KEY` — upstream để sẵn
+  `change-this-key-on-deployment`
+- **mật khẩu hạ tầng** (6): Postgres, RabbitMQ, MinIO — upstream mặc định `plane/plane`
 
-Sau khi `up`, migration DB chạy nền vài phút — theo dõi bằng `./plane.sh logs migrator`
-cho tới khi container `migrator` thoát với mã 0.
-
-### Việc cần làm ngay sau lần chạy đầu
-
-Vào `https://<domain>/god-mode/`, tạo **Instance Admin** (ai vào trước thì được), rồi:
-
-- **Tắt `enable_signup`** nếu là hệ thống nội bộ — mặc định ai biết domain cũng tự đăng ký được
-- **Cấu hình SMTP** — mặc định chưa có nên không mời được thành viên qua email, không dùng được magic link
-
-### Vì sao cần `plane.sh`
-
-Stack chạy bằng 2 compose file và 2 env file. Gõ `docker compose up -d` trần thì
-Compose không nạp `plane.env` (nó chỉ tự tìm `.env`), rơi về mật khẩu mặc định
-`plane:plane` và không vào được DB. Script chỉ làm đúng một việc là ghép đủ cờ:
-
-```bash
-docker compose --project-directory plane-app \
-               -f plane-app/docker-compose.yaml -f docker-compose.override.yaml \
-               --env-file plane-app/plane.env  --env-file plane.local.env  <lệnh>
-```
-
-Thích gõ tay thì dùng nguyên câu trên, thứ tự `--env-file` không được đảo.
-
-## Chạy nhiều instance trên cùng một máy
-
-Được, miễn mỗi bản một `PLANE_INSTANCE` và một `APP_DOMAIN` riêng — `init` tự lo và
-từ chối nếu trùng. Container, volume và router Traefik đều lấy tiền tố từ
-`PLANE_INSTANCE` nên không đụng nhau; service `proxy` cũng không publish cổng nào
-ra host nên không tranh cổng.
-
-> ⚠ **Đừng bỏ qua `PLANE_INSTANCE`.** Compose lấy tên project từ *thư mục chứa
-> compose file*, tức là `plane-app` với **mọi** bản clone. Hai bản cùng tên thì bản
-> chạy sau **chiếm và dựng lại container của bản trước** chứ không tạo stack mới.
+Không có biến nào do repo này bịa ra.
 
 ## Data nằm ở đâu
 
-Tất cả trong Docker named volume, **không** nằm trong thư mục repo. Với
-`PLANE_INSTANCE=plane`:
+Tất cả trong Docker named volume, **không** nằm trong thư mục repo:
 
 | Volume | Chứa gì | Quan trọng |
 |---|---|---|
-| `plane_pgdata` | Postgres: project, issue, user, comment | ⭐ sống còn |
-| `plane_uploads` | MinIO: file đính kèm, ảnh, avatar | ⭐ sống còn |
-| `plane_rabbitmq_data`, `plane_redisdata` | hàng đợi, cache | mất vẫn chạy lại được |
-| `plane_proxy_config`, `plane_proxy_data` | Caddy nội bộ | không cần (cert do Traefik giữ) |
-| `plane_logs_*` | log | không cần |
+| `plane-app_pgdata` | Postgres: project, issue, user, comment | ⭐ sống còn |
+| `plane-app_uploads` | MinIO: file đính kèm, ảnh, avatar | ⭐ sống còn |
+| `plane-app_rabbitmq_data`, `plane-app_redisdata` | hàng đợi, cache | mất vẫn chạy lại được |
+| `plane-app_proxy_config`, `plane-app_proxy_data` | Caddy nội bộ | không cần (cert do Traefik giữ) |
+| `plane-app_logs_*` | log | không cần |
+
+Tiền tố `plane-app` là tên compose project mặc định, lấy từ thư mục `plane-app/`.
+Repo này **cố ý không đặt `COMPOSE_PROJECT_NAME`**: đổi nó thì lệnh Backup và View
+Logs của `setup.sh` không tìm thấy container nữa. Hệ quả là **một máy chạy một bản
+Plane**; muốn bản thứ hai thì phải tự đặt tên project và tên router khác, và chấp
+nhận mất tương thích với `setup.sh`.
 
 `./plane.sh down` giữ nguyên volume. `docker compose down -v` thì **xoá sạch**.
 
-Chạy production lâu dài nên trỏ `DATABASE_URL` sang Postgres ngoài và `AWS_S3_*`
-sang S3 thật (khai đè trong `plane.local.env`), thay vì để trong volume local.
-
-## Nâng cấp
-
-```bash
-./plane.sh backup
-./plane.sh upgrade v1.5.0
-```
-
-`plane.local.env` không bị đụng, bản gốc cũ lùi vào `plane-app/archive/`. Script
-cảnh báo nếu bạn đang đè một biến mà bản Plane mới đã bỏ — lúc đó override thành
-vô nghĩa và cần xem lại.
-
-## Nếu muốn dùng `setup.sh` của Plane
-
-`init` đã thay thế nó, nhưng nếu bạn cần menu gốc (backup, view logs…):
-
-```bash
-curl -fsSL -o setup.sh https://github.com/makeplane/plane/releases/latest/download/setup.sh
-chmod +x setup.sh && ./setup.sh     # chọn 1 (Install), rồi thoát
-```
-
-> ⚠ Bước này **luôn kết thúc bằng lỗi** `pull access denied for minio/minio` — bỏ
-> qua được: `setup.sh` pull bằng file gốc nên không thấy override, nhưng
-> `docker-compose.yaml` và `plane.env` đã ghi xong **trước** bước pull.
->
-> ⛔ Và **đừng dùng menu Start / Restart / Stop của nó**: `setup.sh` gọi compose bằng
-> `-f docker-compose.yaml` tường minh nên **bỏ qua file override** — Plane sẽ lại đòi
-> cổng 80/443 và đụng Traefik. Chỉ dùng `./plane.sh`.
+Chạy production lâu dài nên trỏ `DATABASE_URL` sang Postgres ngoài và `AWS_S3_*` sang
+S3 thật (khai đè trong `plane.local.env`), thay vì để trong volume local.
 
 ## Giấy phép
 
-MIT — xem [LICENSE](LICENSE). Repo này chỉ là lớp cấu hình; bản thân Plane theo
-giấy phép riêng của [makeplane/plane](https://github.com/makeplane/plane).
+MIT — xem [LICENSE](LICENSE). Repo này chỉ là lớp cấu hình; bản thân Plane theo giấy
+phép riêng của [makeplane/plane](https://github.com/makeplane/plane).
