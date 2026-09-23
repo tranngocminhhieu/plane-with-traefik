@@ -83,6 +83,9 @@ Ghim một bản cụ thể: `PLANE_RELEASE=v1.4.2 ./plane.sh init ...`
 ./plane.sh restart
 ./plane.sh backup             # dump DB + file đính kèm + config → ./backups/
 ./plane.sh upgrade v1.5.0     # tải file gốc bản mới rồi khởi động lại
+./plane.sh pull               # chỉ kéo image, không khởi động
+./plane.sh config             # in cấu hình đã merge, để soi khi nghi ngờ
+./plane.sh help
 ./plane.sh <lệnh compose bất kỳ>
 ```
 

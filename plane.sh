@@ -33,16 +33,16 @@ compose() {
 die() { echo "✗ $*" >&2; exit 1; }
 
 require_files() {
-  [ -f "$APP_DIR/docker-compose.yaml" ] || die "thiếu plane-app/docker-compose.yaml — chạy ./setup.sh chọn 1 (Bước 1–3 trong README)"
-  [ -f "$APP_DIR/plane.env" ]           || die "thiếu plane-app/plane.env — chạy ./setup.sh chọn 1 (Bước 1–3 trong README)"
-  [ -f "$ROOT/plane.local.env" ]        || die "thiếu plane.local.env — chép từ plane.local.env.example (Bước 0 trong README)"
+  [ -f "$APP_DIR/docker-compose.yaml" ] || die "thiếu plane-app/docker-compose.yaml — chạy: ./plane.sh init <domain>"
+  [ -f "$APP_DIR/plane.env" ]           || die "thiếu plane-app/plane.env — chạy: ./plane.sh init <domain>"
+  [ -f "$ROOT/plane.local.env" ]        || die "thiếu plane.local.env — chạy: ./plane.sh init <domain>"
 
   # Thiếu COMPOSE_PROJECT_NAME thì Compose lấy tên thư mục "plane-app" làm tên
   # project. Hai bản Plane trên cùng máy sẽ trùng tên và bản chạy sau CHIẾM LUÔN
   # container của bản trước. Tên router Traefik cũng lấy từ biến này, để trống là
   # label thành "traefik.http.routers..rule" và Traefik bỏ qua.
   grep -qE '^PLANE_INSTANCE=.+' "$ROOT/plane.local.env" \
-    || die "plane.local.env chưa đặt PLANE_INSTANCE (xem Bước 0 trong README)"
+    || die "plane.local.env chưa đặt PLANE_INSTANCE — xem plane.local.env.example"
 }
 
 latest_release() {
