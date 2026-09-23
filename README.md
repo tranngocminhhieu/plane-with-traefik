@@ -9,16 +9,20 @@ deploy và giữ nguyên xi. Phần riêng của mình gói gọn trong **2 file
 ```
 plane-with-traefik/
 ├── README.md
+├── LICENSE
 ├── .gitignore
-├── plane.sh                              ← wrapper, xem "Vì sao cần plane.sh"
-└── plane-app/
-    ├── docker-compose.override.yaml      ← 1. đè phần mạng/cổng/image
-    ├── plane.local.env.example           ← 2. mẫu cho biến riêng (chép → plane.local.env)
-    │
-    ├── docker-compose.yaml               (của Plane — setup.sh tải, .gitignore)
-    ├── plane.env                         (của Plane — setup.sh tải, .gitignore)
-    └── plane.local.env                   (secret của bạn, .gitignore)
+├── plane.sh                          ← wrapper, xem "Vì sao cần plane.sh"
+├── docker-compose.override.yaml      ← 1. đè phần mạng/cổng/image
+├── plane.local.env.example           ← 2. mẫu cho biến riêng
+│
+├── plane.local.env                   (secret của bạn — .gitignore)
+└── plane-app/                        (100% của Plane, setup.sh tạo — .gitignore trọn gói)
+    ├── docker-compose.yaml
+    └── plane.env
 ```
+
+Thư mục `plane-app/` thuộc về `setup.sh`, repo này không đụng vào và cũng không
+giữ bản sao nào của nó. Mọi thứ của mình nằm ở thư mục gốc.
 
 Nguyên tắc: **`plane.env` không bao giờ bị sửa.** Muốn đổi gì thì khai lại biến đó
 trong `plane.local.env`. Nhờ vậy nâng cấp Plane chỉ là tải đè `plane.env` bản mới,
@@ -55,14 +59,14 @@ secret ứng dụng (2), mật khẩu Postgres / RabbitMQ / MinIO (6).
 ## Bước 0 — Điền domain và secret
 
 ```bash
-cp plane-app/plane.local.env.example plane-app/plane.local.env
-chmod 600 plane-app/plane.local.env
+cp plane.local.env.example plane.local.env
+chmod 600 plane.local.env
 
 # sinh secret, dán vào 6 dòng còn trống trong file
 for i in 1 2; do openssl rand -hex 32; done; for i in 1 2; do openssl rand -hex 16; done
 ```
 
-Mở `plane-app/plane.local.env` và điền:
+Mở `plane.local.env` và điền:
 
 - **`PLANE_INSTANCE`** (và `COMPOSE_PROJECT_NAME` bằng nó) — tên instance, quyết định tiền tố container/volume
   **và tên router Traefik**. Một máy chạy nhiều bản Plane thì mỗi bản một tên khác
@@ -148,8 +152,9 @@ Compose không nạp `plane.env` (nó chỉ tự tìm `.env`), nên rơi về m�
 `plane:plane` và không vào được DB. `plane.sh` chỉ làm đúng một việc là ghép đủ cờ:
 
 ```bash
-docker compose -f docker-compose.yaml -f docker-compose.override.yaml \
-               --env-file plane.env --env-file plane.local.env  <lệnh>
+docker compose --project-directory plane-app \
+               -f plane-app/docker-compose.yaml -f docker-compose.override.yaml \
+               --env-file plane-app/plane.env  --env-file plane.local.env  <lệnh>
 ```
 
 Thích gõ tay thì dùng nguyên câu trên, thứ tự `--env-file` không được đảo.

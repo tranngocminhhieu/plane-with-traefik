@@ -23,9 +23,9 @@ compose() {
   docker compose \
     --project-directory "$APP_DIR" \
     -f "$APP_DIR/docker-compose.yaml" \
-    -f "$APP_DIR/docker-compose.override.yaml" \
+    -f "$ROOT/docker-compose.override.yaml" \
     --env-file "$APP_DIR/plane.env" \
-    --env-file "$APP_DIR/plane.local.env" \
+    --env-file "$ROOT/plane.local.env" \
     "$@"
 }
 
@@ -34,13 +34,13 @@ die() { echo "✗ $*" >&2; exit 1; }
 require_files() {
   [ -f "$APP_DIR/docker-compose.yaml" ] || die "thiếu plane-app/docker-compose.yaml — chạy ./setup.sh chọn 1 (Bước 1–3 trong README)"
   [ -f "$APP_DIR/plane.env" ]           || die "thiếu plane-app/plane.env — chạy ./setup.sh chọn 1 (Bước 1–3 trong README)"
-  [ -f "$APP_DIR/plane.local.env" ]     || die "thiếu plane-app/plane.local.env — chép từ plane.local.env.example (Bước 0 trong README)"
+  [ -f "$ROOT/plane.local.env" ]        || die "thiếu plane.local.env — chép từ plane.local.env.example (Bước 0 trong README)"
 
   # Thiếu COMPOSE_PROJECT_NAME thì Compose lấy tên thư mục "plane-app" làm tên
   # project. Hai bản Plane trên cùng máy sẽ trùng tên và bản chạy sau CHIẾM LUÔN
   # container của bản trước. Tên router Traefik cũng lấy từ biến này, để trống là
   # label thành "traefik.http.routers..rule" và Traefik bỏ qua.
-  grep -qE '^PLANE_INSTANCE=.+' "$APP_DIR/plane.local.env" \
+  grep -qE '^PLANE_INSTANCE=.+' "$ROOT/plane.local.env" \
     || die "plane.local.env chưa đặt PLANE_INSTANCE (xem Bước 0 trong README)"
 }
 
@@ -72,8 +72,11 @@ fetch_upstream() {
 check_drift() {
   local orphan=() key
   while IFS= read -r key; do
+    # PLANE_INSTANCE/COMPOSE_PROJECT_NAME là biến điều khiển của riêng repo này,
+    # plane.env gốc không có và sẽ không bao giờ có — bỏ qua, đừng báo nhầm.
+    case "$key" in PLANE_INSTANCE|COMPOSE_PROJECT_NAME) continue ;; esac
     grep -qE "^${key}=" "$APP_DIR/plane.env" || orphan+=("$key")
-  done < <(grep -oE '^[A-Z_0-9]+=' "$APP_DIR/plane.local.env" | tr -d '=')
+  done < <(grep -oE '^[A-Z_0-9]+=' "$ROOT/plane.local.env" | tr -d '=')
 
   if [ "${#orphan[@]}" -gt 0 ]; then
     echo "⚠ plane.local.env đang đè biến mà plane.env bản mới KHÔNG còn: ${orphan[*]}"
@@ -127,8 +130,9 @@ case "$cmd" in
     docker run --rm -v plane-app_uploads:/d:ro -v "$out:/b" alpine \
       tar czf "/b/plane-uploads-$stamp.tar.gz" -C /d .
     echo "→ giữ luôn cấu hình (có secret — bảo quản như mật khẩu)"
-    tar czf "$out/plane-config-$stamp.tar.gz" -C "$APP_DIR" \
-      plane.env plane.local.env docker-compose.yaml docker-compose.override.yaml
+    tar czf "$out/plane-config-$stamp.tar.gz" \
+      -C "$APP_DIR" plane.env docker-compose.yaml \
+      -C "$ROOT"    plane.local.env docker-compose.override.yaml
     ls -lh "$out"/*"$stamp"*
     ;;
 
