@@ -15,16 +15,23 @@ services:
     networks:
       - default      # nói chuyện với web/api/space/admin/live trong mạng của project
       - proxy_net    # để Traefik nhìn thấy và gọi vào
+    # labels viết dạng LIST chứ không phải mapping: Compose chỉ nội suy biến ở
+    # phần value, không nội suy ở KEY. Viết mapping thì ${PLANE_INSTANCE} nằm trong
+    # key và render ra "$${PLANE_INSTANCE}" — Traefik lặng lẽ bỏ qua router đó.
     labels:
-      traefik.enable: "true"
-      traefik.docker.network: proxy_net
-      # ${APP_DOMAIN} lấy từ plane.local.env — domain chỉ khai MỘT chỗ duy nhất.
-      traefik.http.routers.plane.rule: Host(`${APP_DOMAIN}`)
-      traefik.http.routers.plane.entrypoints: websecure
-      traefik.http.routers.plane.tls.certresolver: letsencrypt
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy_net"
+      # Tên router/service lấy theo ${PLANE_INSTANCE}: hai bản Plane trên cùng một
+      # Traefik mà trùng tên router là chúng đá nhau, Traefik giữ một cái và không báo.
+      # Dùng PLANE_INSTANCE chứ không dùng thẳng COMPOSE_PROJECT_NAME vì Compose
+      # không nội suy biến COMPOSE_* vào file YAML.
+      # ${APP_DOMAIN} cũng lấy từ plane.local.env — domain khai MỘT chỗ duy nhất.
+      - "traefik.http.routers.${PLANE_INSTANCE}.rule=Host(`${APP_DOMAIN}`)"
+      - "traefik.http.routers.${PLANE_INSTANCE}.entrypoints=websecure"
+      - "traefik.http.routers.${PLANE_INSTANCE}.tls.certresolver=letsencrypt"
       # Caddy trong plane-proxy nghe cổng 80 (SITE_ADDRESS=:80 trong plane.env);
       # TLS do Traefik lo, nên ở đây là HTTP thuần.
-      traefik.http.services.plane.loadbalancer.server.port: "80"
+      - "traefik.http.services.${PLANE_INSTANCE}.loadbalancer.server.port=80"
 
 networks:
   proxy_net:

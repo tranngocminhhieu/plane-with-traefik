@@ -29,8 +29,8 @@ cấu hình của bạn không mất và cũng không lẫn vào file gốc.
 **`docker-compose.override.yaml`** sửa đúng 2 chỗ:
 
 1. **Gỡ publish cổng 80/443** của service `proxy` (dùng `!override []`) rồi gắn nó
-   vào network `proxy_net` kèm label Traefik, với rule `Host(${APP_DOMAIN})` đọc từ
-   env file. Mặc định Plane tự chiếm 80/443, đụng ngay với Traefik đang chạy. Giờ
+   vào network `proxy_net` kèm label Traefik, với rule `Host(${APP_DOMAIN})` và tên
+   router `${COMPOSE_PROJECT_NAME}` đều đọc từ env file. Mặc định Plane tự chiếm 80/443, đụng ngay với Traefik đang chạy. Giờ
    Traefik lo TLS, Caddy nội bộ của Plane chỉ nghe HTTP trong mạng nội bộ.
 2. **Đổi image MinIO sang quay.io.** Repo `minio/minio` trên Docker Hub đã bị gỡ —
    bản gốc của Plane pull nó sẽ chết với `pull access denied ... repository does
@@ -62,9 +62,16 @@ chmod 600 plane-app/plane.local.env
 for i in 1 2; do openssl rand -hex 32; done; for i in 1 2; do openssl rand -hex 16; done
 ```
 
-Mở `plane-app/plane.local.env`, sửa `APP_DOMAIN` thành domain của bạn và điền đủ
-secret. Chỉ vậy thôi — label Traefik trong `docker-compose.override.yaml` đọc
-`${APP_DOMAIN}` từ chính file này, nên domain khai một chỗ duy nhất.
+Mở `plane-app/plane.local.env` và điền:
+
+- **`PLANE_INSTANCE`** (và `COMPOSE_PROJECT_NAME` bằng nó) — tên instance, quyết định tiền tố container/volume
+  **và tên router Traefik**. Một máy chạy nhiều bản Plane thì mỗi bản một tên khác
+  nhau; trùng tên là bản chạy sau chiếm luôn container của bản trước.
+- **`APP_DOMAIN`** — domain của bạn.
+- 6 dòng secret còn trống.
+
+Không phải sửa gì trong `docker-compose.override.yaml`: cả domain lẫn tên router
+đều đọc biến từ file này.
 
 ## Bước 1 — Tải bộ cài của Plane
 
@@ -86,6 +93,16 @@ chmod +x setup.sh
 
 Chọn **`1` (Install)**, rồi **thoát menu**. Bước này chỉ tải `docker-compose.yaml`
 và `plane.env` vào `plane-app/`, không đụng tới hai file override của bạn.
+
+> ⚠ **Bước này sẽ kết thúc bằng lỗi — đúng như dự kiến, cứ bỏ qua:**
+> ```
+> plane-minio Error pull access denied for minio/minio, repository does not exist
+> Failed to pull the images. Exiting...
+> ```
+> `setup.sh` pull bằng file gốc nên vẫn trỏ vào `minio/minio` đã bị gỡ khỏi Docker
+> Hub. Không sao: hai file gốc đã được ghi xong **trước** bước pull, và `./plane.sh up`
+> ở Bước 4 sẽ pull lại bằng image quay.io trong file override. Kiểm tra nhanh:
+> `ls plane-app/docker-compose.yaml plane-app/plane.env`
 
 > ⛔ **Đừng dùng tiếp menu Start / Restart / Stop của `setup.sh`.** Script gọi
 > compose bằng `-f docker-compose.yaml` tường minh nên **bỏ qua file override** —
@@ -169,3 +186,10 @@ bản Plane mới đã bỏ — lúc đó override thành vô nghĩa và cần x
 
 MIT — xem [LICENSE](LICENSE). Repo này chỉ là lớp cấu hình; bản thân Plane theo
 giấy phép riêng của [makeplane/plane](https://github.com/makeplane/plane).
+
+## Chạy nhiều instance trên cùng một máy
+
+Được, miễn mỗi bản một `PLANE_INSTANCE` và một `APP_DOMAIN` riêng trong
+`plane.local.env`. Container, volume và router Traefik đều lấy tiền tố từ biến đó
+nên không đụng nhau. Service `proxy` không publish cổng nào ra host nên cũng không
+có chuyện tranh cổng.
