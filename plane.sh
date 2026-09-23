@@ -5,12 +5,13 @@
 # up -d` trần thì Compose không nạp plane.env (nó chỉ tự tìm .env), rơi về mật
 # khẩu mặc định plane:plane và không vào được DB. Script chỉ ghép đủ cờ.
 #
+#   ./plane.sh init <domain> [tên-instance]   # lần đầu: sinh cấu hình + tải file gốc
 #   ./plane.sh up | down | restart | ps | logs [service] | pull | config
 #   ./plane.sh backup [thư-mục]     # dump DB + uploads + config
 #   ./plane.sh upgrade v1.5.0       # tải file gốc bản mới rồi khởi động lại
 #   ./plane.sh <lệnh docker compose bất kỳ>
 #
-# Lần đầu cài: làm theo Bước 0–5 trong README.md.
+# Lần đầu cài: ./plane.sh init <domain> rồi ./plane.sh up. Chi tiết trong README.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,6 +45,11 @@ require_files() {
     || die "plane.local.env chưa đặt PLANE_INSTANCE (xem Bước 0 trong README)"
 }
 
+latest_release() {
+  curl -fsSL "https://api.github.com/repos/$GH_REPO/releases/latest" \
+    | grep -o '"tag_name": "[^"]*"' | sed 's/.*: "//;s/"//'
+}
+
 # Tải file gốc của một release về plane-app. Bản cũ lùi vào archive/ chứ không đè
 # thẳng, để còn đường quay lại khi bản mới đổi biến.
 fetch_upstream() {
@@ -60,8 +66,8 @@ fetch_upstream() {
   curl -fsSL "$base/variables.env" -o "$tmp_env" \
     || die "không tải được $base/variables.env"
 
-  cp "$APP_DIR/docker-compose.yaml" "$APP_DIR/archive/$ts.docker-compose.yaml"
-  cp "$APP_DIR/plane.env"           "$APP_DIR/archive/$ts.env"
+  [ -f "$APP_DIR/docker-compose.yaml" ] && cp "$APP_DIR/docker-compose.yaml" "$APP_DIR/archive/$ts.docker-compose.yaml"
+  [ -f "$APP_DIR/plane.env" ]           && cp "$APP_DIR/plane.env"           "$APP_DIR/archive/$ts.env"
   mv "$tmp_compose" "$APP_DIR/docker-compose.yaml"
   mv "$tmp_env"     "$APP_DIR/plane.env"
   echo "✓ đã cập nhật file gốc (bản cũ ở archive/$ts.*)"
@@ -87,6 +93,69 @@ check_drift() {
 cmd="${1:-help}"; shift || true
 
 case "$cmd" in
+  init)
+    domain="${1:-}"
+    [ -n "$domain" ] || die "cần domain, ví dụ: ./plane.sh init ticket.example.com"
+    [[ "$domain" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] \
+      || die "domain không hợp lệ: $domain"
+    # Tên instance mặc định lấy nhãn đầu của domain, đủ gợi nhớ mà vẫn khác nhau
+    # giữa các bản trên cùng một máy.
+    instance="${2:-$(echo "${domain%%.*}" | tr -cd 'a-z0-9-')}"
+    [ -n "$instance" ] || die "tên instance rỗng — truyền tay: ./plane.sh init $domain <tên>"
+
+    # ── Chốt an toàn ─────────────────────────────────────────────────────────
+    # Ghi đè plane.local.env là xoá mất secret mà Postgres/MinIO đã khởi tạo theo.
+    # Stack sẽ không vào được DB nữa và data coi như mất. Không bao giờ ghi đè.
+    [ -f "$ROOT/plane.local.env" ] \
+      && die "plane.local.env đã tồn tại — xoá tay nếu thực sự muốn làm lại (MẤT DATA của stack cũ)"
+
+    # Trùng tên project là bản mới CHIẾM container của bản đang chạy.
+    if docker compose ls --format json 2>/dev/null | grep -q "\"Name\":\"$instance\""; then
+      die "đã có compose project tên '$instance' trên máy này — chọn tên khác: ./plane.sh init $domain <tên-khác>"
+    fi
+
+    echo "→ instance : $instance"
+    echo "→ domain   : $domain"
+
+    # DNS sai thì Let's Encrypt không cấp được cert. Cảnh báo thôi, không chặn:
+    # có người trỏ DNS sau, hoặc chạy sau một lớp proxy khác.
+    host_ip="$(curl -fsS --max-time 8 https://ifconfig.me 2>/dev/null || echo '')"
+    dns_ip="$(getent hosts "$domain" | awk '{print $1; exit}')"
+    if [ -z "$dns_ip" ]; then
+      echo "⚠ $domain chưa phân giải được — Let's Encrypt sẽ KHÔNG cấp cert cho tới khi bạn trỏ DNS."
+    elif [ -n "$host_ip" ] && [ "$dns_ip" != "$host_ip" ]; then
+      echo "⚠ $domain đang trỏ về $dns_ip, không phải máy này ($host_ip) — cert sẽ fail."
+    else
+      echo "✓ DNS đã trỏ đúng về máy này"
+    fi
+
+    # ── Sinh cấu hình ────────────────────────────────────────────────────────
+    command -v openssl >/dev/null || die "cần openssl để sinh secret"
+    umask 077
+    sed -e "s|^PLANE_INSTANCE=.*|PLANE_INSTANCE=$instance|" \
+        -e "s|^APP_DOMAIN=.*|APP_DOMAIN=$domain|" \
+        -e "s|^SECRET_KEY=.*|SECRET_KEY=$(openssl rand -hex 32)|" \
+        -e "s|^LIVE_SERVER_SECRET_KEY=.*|LIVE_SERVER_SECRET_KEY=$(openssl rand -hex 32)|" \
+        -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 16)|" \
+        -e "s|^RABBITMQ_PASSWORD=.*|RABBITMQ_PASSWORD=$(openssl rand -hex 16)|" \
+        -e "s|^AWS_ACCESS_KEY_ID=.*|AWS_ACCESS_KEY_ID=plane-$(openssl rand -hex 6)|" \
+        -e "s|^AWS_SECRET_ACCESS_KEY=.*|AWS_SECRET_ACCESS_KEY=$(openssl rand -hex 20)|" \
+        "$ROOT/plane.local.env.example" > "$ROOT/plane.local.env"
+    chmod 600 "$ROOT/plane.local.env"
+    echo "✓ đã tạo plane.local.env (secret sinh ngẫu nhiên, chmod 600)"
+
+    # ── Tải file gốc của Plane ───────────────────────────────────────────────
+    # Làm thẳng bằng curl thay vì gọi setup.sh: setup.sh pull bằng file gốc nên
+    # luôn chết ở image minio/minio đã bị gỡ khỏi Docker Hub, gây hoang mang vô ích.
+    release="${PLANE_RELEASE:-$(latest_release)}"
+    echo "→ bản Plane: $release"
+    mkdir -p "$APP_DIR"
+    fetch_upstream "$release"
+
+    echo
+    echo "Xong. Chạy tiếp:  ./plane.sh up"
+    ;;
+
   up)
     require_files
     compose pull
