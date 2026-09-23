@@ -1,0 +1,16 @@
+# ── File của Plane (nhà phát triển gốc) — setup.sh tự tải về, không commit ──
+setup.sh
+plane-app/docker-compose.yaml
+plane-app/plane.env
+plane-app/plane.env.bak
+plane-app/variables-upgrade.env
+plane-app/archive/
+
+# ── Secret ──
+plane-app/plane.local.env
+
+# ── Backup ──
+backups/
+
+# ── Công cụ cá nhân ──
+.claude/
